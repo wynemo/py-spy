@@ -93,7 +93,8 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
             let bss_header = elf
                 .section_headers
                 .iter()
-                .find(|header| header.sh_type == goblin::elf::section_header::SHT_NOBITS)
+                .filter(|header| header.sh_type == goblin::elf::section_header::SHT_NOBITS)
+                .max_by_key(|header| header.sh_size)
                 .ok_or_else(|| {
                     format_err!(
                         "Failed to find BSS section header in {}",

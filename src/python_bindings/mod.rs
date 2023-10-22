@@ -197,7 +197,14 @@ pub mod pyruntime {
         }
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[cfg(all(
+        target_os = "linux",
+        any(
+            target_arch = "x86_64",
+            target_arch = "mips64",
+            target_arch = "mips64le",
+        )
+    ))]
     pub fn get_tstate_current_offset(version: &Version) -> Option<usize> {
         match version {
             Version {

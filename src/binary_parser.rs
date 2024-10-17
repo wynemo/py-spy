@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use anyhow::Error;
@@ -25,13 +26,16 @@ impl BinaryInfo {
 
 /// Uses goblin to parse a binary file, returns information on symbols/bss/adjusted offset etc
 pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo, Error> {
+    info!("parse_binary @ {} {} {}", filename.display(), addr, size);
     let offset = addr;
 
     let mut symbols = HashMap::new();
 
     // Read in the filename
-    let file = File::open(filename)?;
-    let buffer = unsafe { Mmap::map(&file)? };
+    let mut file = File::open(filename)?;
+    // let buffer = unsafe { Mmap::map(&file)? };
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
 
     // Use goblin to parse the binary
     match Object::parse(&buffer)? {
@@ -90,6 +94,7 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
         }
 
         Object::Elf(elf) => {
+            info!("Found libpython binary in elf");
             let bss_header = elf
                 .section_headers
                 .iter()
@@ -171,6 +176,10 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
                     }
                 })
         }
-        _ => Err(format_err!("Unhandled binary type")),
+        // _ => Err(format_err!("Unhandled binary type")),
+        _ => {
+            info!("Unhandled binary type {:?}", Object::parse(&buffer)?);
+            Err(format_err!("Unhandled binary type"))
+        }
     }
 }

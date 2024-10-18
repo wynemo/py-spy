@@ -1,9 +1,7 @@
-#[cfg(windows)]
-use regex::RegexBuilder;
 use std::collections::HashMap;
-#[cfg(all(target_os = "linux", unwind))]
+#[cfg(all(target_os = "linux", feature = "unwind"))]
 use std::collections::HashSet;
-#[cfg(all(target_os = "linux", unwind))]
+#[cfg(all(target_os = "linux", feature = "unwind"))]
 use std::iter::FromIterator;
 use std::path::Path;
 
@@ -11,10 +9,10 @@ use anyhow::{Context, Error, Result};
 use remoteprocess::{Pid, Process, ProcessMemory, Tid};
 
 use crate::config::{Config, LockingStrategy};
-#[cfg(unwind)]
+#[cfg(feature = "unwind")]
 use crate::native_stack_trace::NativeStack;
 use crate::python_bindings::{
-    v2_7_15, v3_10_0, v3_11_0, v3_3_7, v3_5_5, v3_6_6, v3_7_0, v3_8_0, v3_9_5,
+    v2_7_15, v3_10_0, v3_11_0, v3_12_0, v3_3_7, v3_5_5, v3_6_6, v3_7_0, v3_8_0, v3_9_5,
 };
 use crate::python_data_access::format_variable;
 use crate::python_interpreters::{InterpreterState, ThreadState};
@@ -32,10 +30,8 @@ pub struct PythonSpy {
     pub version: Version,
     pub interpreter_address: usize,
     pub threadstate_address: usize,
-    pub python_filename: std::path::PathBuf,
-    pub version_string: String,
     pub config: Config,
-    #[cfg(unwind)]
+    #[cfg(feature = "unwind")]
     pub native: Option<NativeStack>,
     pub short_filenames: HashMap<String, Option<String>>,
     pub python_thread_ids: HashMap<u64, Tid>,
@@ -68,9 +64,7 @@ impl PythonSpy {
         // lets us figure out which thread has the GIL
         let threadstate_address = get_threadstate_address(&python_info, &version, config)?;
 
-        let version_string = format!("python{}.{}", version.major, version.minor);
-
-        #[cfg(unwind)]
+        #[cfg(feature = "unwind")]
         let native = if config.native {
             Some(NativeStack::new(
                 pid,
@@ -87,9 +81,7 @@ impl PythonSpy {
             version,
             interpreter_address,
             threadstate_address,
-            python_filename: python_info.python_filename,
-            version_string,
-            #[cfg(unwind)]
+            #[cfg(feature = "unwind")]
             native,
             #[cfg(target_os = "linux")]
             dockerized: python_info.dockerized,
@@ -178,6 +170,11 @@ impl PythonSpy {
                 minor: 11,
                 ..
             } => self._get_stack_traces::<v3_11_0::_is>(),
+            Version {
+                major: 3,
+                minor: 12,
+                ..
+            } => self._get_stack_traces::<v3_12_0::_is>(),
             _ => Err(format_err!(
                 "Unsupported version of Python: {}",
                 self.version
@@ -189,9 +186,14 @@ impl PythonSpy {
     fn _get_stack_traces<I: InterpreterState>(&mut self) -> Result<Vec<StackTrace>, Error> {
         // Query the OS to get if each thread in the process is running or not
         let mut thread_activity = HashMap::new();
-        for thread in self.process.threads()?.iter() {
-            let threadid: Tid = thread.id()?;
-            thread_activity.insert(threadid, thread.active()?);
+        if self.config.gil_only {
+            // Don't need to collect thread activity if we're only getting the
+            // GIL thread: If we're holding the GIL we're by definition active.
+        } else {
+            for thread in self.process.threads()?.iter() {
+                let threadid: Tid = thread.id()?;
+                thread_activity.insert(threadid, thread.active()?);
+            }
         }
 
         // Lock the process if appropriate. Note we have to lock AFTER getting the thread
@@ -224,6 +226,15 @@ impl PythonSpy {
                 .process
                 .copy_pointer(threads)
                 .context("Failed to copy PyThreadState")?;
+            threads = thread.next();
+
+            let python_thread_id = thread.thread_id();
+            let owns_gil = python_thread_id == gil_thread_id;
+
+            if self.config.gil_only && !owns_gil {
+                continue;
+            }
+
             let mut trace = get_stack_trace(
                 &thread,
                 &self.process,
@@ -232,7 +243,6 @@ impl PythonSpy {
             )?;
 
             // Try getting the native thread id
-            let python_thread_id = thread.thread_id();
 
             // python 3.11+ has the native thread id directly on the PyThreadState object,
             // for older versions of python, try using OS specific code to get the native
@@ -255,7 +265,7 @@ impl PythonSpy {
             }
 
             trace.thread_name = self._get_python_thread_name(python_thread_id);
-            trace.owns_gil = trace.thread_id == gil_thread_id;
+            trace.owns_gil = owns_gil;
             trace.pid = self.process.pid;
 
             // Figure out if the thread is sleeping from the OS if possible
@@ -278,7 +288,7 @@ impl PythonSpy {
             }
 
             // Merge in the native stack frames if necessary
-            #[cfg(unwind)]
+            #[cfg(feature = "unwind")]
             {
                 if self.config.native {
                     if let Some(native) = self.native.as_mut() {
@@ -314,7 +324,11 @@ impl PythonSpy {
                 return Err(format_err!("Max thread recursion depth reached"));
             }
 
-            threads = thread.next();
+            if self.config.gil_only {
+                // There's only one GIL thread and we've captured it, so we can
+                // stop now
+                break;
+            }
         }
         Ok(traces)
     }
@@ -372,7 +386,7 @@ impl PythonSpy {
         Ok(None)
     }
 
-    #[cfg(all(target_os = "linux", not(unwind)))]
+    #[cfg(all(target_os = "linux", not(feature = "unwind")))]
     fn _get_os_thread_id<I: InterpreterState>(
         &mut self,
         _python_thread_id: u64,
@@ -381,7 +395,7 @@ impl PythonSpy {
         Ok(None)
     }
 
-    #[cfg(all(target_os = "linux", unwind))]
+    #[cfg(all(target_os = "linux", feature = "unwind"))]
     fn _get_os_thread_id<I: InterpreterState>(
         &mut self,
         python_thread_id: u64,
@@ -466,7 +480,7 @@ impl PythonSpy {
         Ok(None)
     }
 
-    #[cfg(all(target_os = "linux", unwind))]
+    #[cfg(all(target_os = "linux", feature = "unwind"))]
     pub fn _get_pthread_id(
         &self,
         unwinder: &remoteprocess::Unwinder,

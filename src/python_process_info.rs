@@ -10,12 +10,14 @@ use std::slice;
 use anyhow::{Context, Error, Result};
 use lazy_static::lazy_static;
 use proc_maps::{get_process_maps, MapRange};
-use remoteprocess::{Pid, ProcessMemory};
+#[cfg(not(target_os = "macos"))]
+use remoteprocess::Pid;
+use remoteprocess::ProcessMemory;
 
 use crate::binary_parser::{parse_binary, BinaryInfo};
 use crate::config::Config;
 use crate::python_bindings::{
-    pyruntime, v2_7_15, v3_10_0, v3_11_0, v3_3_7, v3_5_5, v3_6_6, v3_7_0, v3_8_0, v3_9_5,
+    pyruntime, v2_7_15, v3_10_0, v3_11_0, v3_12_0, v3_3_7, v3_5_5, v3_6_6, v3_7_0, v3_8_0, v3_9_5,
 };
 use crate::python_interpreters::{InterpreterState, ThreadState};
 use crate::stack_trace::get_stack_traces;
@@ -318,6 +320,7 @@ where
                             minor,
                             patch: 0,
                             release_flags: "".to_owned(),
+                            build_metadata: None,
                         });
                     }
                 }
@@ -342,7 +345,7 @@ where
     match version {
         Version {
             major: 3,
-            minor: 7..=11,
+            minor: 7..=12,
             ..
         } => {
             if let Some(&addr) = python_info.get_symbol("_PyRuntime") {
@@ -516,6 +519,11 @@ where
             minor: 11,
             ..
         } => check::<v3_11_0::_is, P>(addrs, maps, process),
+        Version {
+            major: 3,
+            minor: 12,
+            ..
+        } => check::<v3_12_0::_is, P>(addrs, maps, process),
         _ => Err(format_err!("Unsupported version of Python: {}", version)),
     }
 }
@@ -528,7 +536,7 @@ pub fn get_threadstate_address(
     let threadstate_address = match version {
         Version {
             major: 3,
-            minor: 7..=11,
+            minor: 7..=12,
             ..
         } => match python_info.get_symbol("_PyRuntime") {
             Some(&addr) => {
@@ -602,7 +610,7 @@ pub trait ContainsAddr {
 
 impl ContainsAddr for Vec<MapRange> {
     #[cfg(windows)]
-    fn contains_addr(&self, addr: usize) -> bool {
+    fn contains_addr(&self, _addr: usize) -> bool {
         // On windows, we can't just check if a pointer is valid by looking to see if it points
         // to something in the virtual memory map. Brute-force it instead
         true

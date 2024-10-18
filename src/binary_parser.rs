@@ -8,17 +8,17 @@ use goblin::Object;
 use memmap::Mmap;
 
 pub struct BinaryInfo {
-    pub filename: std::path::PathBuf,
     pub symbols: HashMap<String, u64>,
     pub bss_addr: u64,
     pub bss_size: u64,
-    pub offset: u64,
+    #[allow(dead_code)]
     pub addr: u64,
+    #[allow(dead_code)]
     pub size: u64,
 }
 
 impl BinaryInfo {
-    #[cfg(unwind)]
+    #[cfg(feature = "unwind")]
     pub fn contains(&self, addr: u64) -> bool {
         addr >= self.addr && addr < (self.addr + self.size)
     }
@@ -82,21 +82,27 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
                 }
             }
             Ok(BinaryInfo {
-                filename: filename.to_owned(),
                 symbols,
                 bss_addr,
                 bss_size,
-                offset,
                 addr,
                 size,
             })
         }
 
         Object::Elf(elf) => {
+            let strtab = elf.shdr_strtab;
             let bss_header = elf
                 .section_headers
                 .iter()
+                // filter down to things that are both NOBITS sections and are named .bss
                 .filter(|header| header.sh_type == goblin::elf::section_header::SHT_NOBITS)
+                .filter(|header| {
+                    strtab
+                        .get_at(header.sh_name)
+                        .map_or(true, |name| name == ".bss")
+                })
+                // if we have multiple sections here, take the largest
                 .max_by_key(|header| header.sh_size)
                 .ok_or_else(|| {
                     format_err!(
@@ -132,11 +138,9 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
                 symbols.insert(name, dynsym.st_value + offset);
             }
             Ok(BinaryInfo {
-                filename: filename.to_owned(),
                 symbols,
                 bss_addr: bss_header.sh_addr + offset,
                 bss_size: bss_header.sh_size,
-                offset,
                 addr,
                 size,
             })
@@ -164,11 +168,9 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
                     let bss_size = u64::from(data_section.virtual_size);
 
                     BinaryInfo {
-                        filename: filename.to_owned(),
                         symbols,
                         bss_addr,
                         bss_size,
-                        offset,
                         addr,
                         size,
                     }

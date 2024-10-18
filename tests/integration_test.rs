@@ -62,7 +62,7 @@ fn test_busy_loop() {
     assert!(traces[0].active);
 }
 
-#[cfg(unwind)]
+#[cfg(feature = "unwind")]
 #[test]
 fn test_thread_reuse() {
     // on linux we had an issue with the pthread -> native thread id caching
@@ -227,6 +227,34 @@ fn test_unicode() {
     );
 
     assert!(!traces[0].owns_gil);
+}
+
+#[test]
+fn test_cyrillic() {
+    #[cfg(target_os = "macos")]
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            return;
+        }
+    }
+
+    // Identifiers with characters outside the ASCII range are supported from Python 3
+    let runner = TestRunner::new(Config::default(), "./tests/scripts/longsleep.py");
+    if runner.spy.version.major == 2 {
+        return;
+    }
+
+    let mut runner = TestRunner::new(Config::default(), "./tests/scripts/cyrillic.py");
+
+    let traces = runner.spy.get_stack_traces().unwrap();
+    assert_eq!(traces.len(), 1);
+    let trace = &traces[0];
+
+    assert_eq!(trace.frames[0].name, "кириллица");
+    assert_eq!(trace.frames[0].line, 4);
+
+    assert_eq!(trace.frames[1].name, "<module>");
+    assert_eq!(trace.frames[1].line, 7);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 pub mod v2_7_15;
 pub mod v3_10_0;
 pub mod v3_11_0;
+pub mod v3_12_0;
 pub mod v3_3_7;
 pub mod v3_5_5;
 pub mod v3_6_6;
@@ -71,7 +72,7 @@ pub mod pyruntime {
             } => 32,
             Version {
                 major: 3,
-                minor: 11,
+                minor: 11..=12,
                 ..
             } => 40,
             _ => 24,
@@ -229,7 +230,10 @@ pub mod pyruntime {
             },
             Version {
                 major: 3, minor: 8, ..
-            } => Some(1368),
+            } => match version.build_metadata.as_deref() {
+                Some("cinder") => Some(1384),
+                _ => Some(1368),
+            },
             Version {
                 major: 3,
                 minor: 9..=10,

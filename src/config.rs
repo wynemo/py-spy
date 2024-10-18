@@ -67,6 +67,7 @@ pub enum FileFormat {
     flamegraph,
     raw,
     speedscope,
+    chrometrace,
 }
 
 impl FileFormat {
@@ -159,11 +160,15 @@ impl Config {
             .help("PID of a running python program to spy on")
             .takes_value(true);
 
-        #[cfg(unwind)]
-        let native = Arg::new("native")
+        let mut native = Arg::new("native")
             .short('n')
             .long("native")
             .help("Collect stack traces from native extensions written in Cython, C or C++");
+
+        // Only show `--native` on platforms where it's supported
+        if !cfg!(feature = "unwind") {
+            native = native.hide(true);
+        }
 
         #[cfg(not(target_os="freebsd"))]
         let nonblocking = Arg::new("nonblocking")
@@ -326,12 +331,8 @@ impl Config {
                     .help("Shell type"),
             );
 
-        // add native unwinding if appropriate
-        #[cfg(unwind)]
         let record = record.arg(native.clone());
-        #[cfg(unwind)]
         let top = top.arg(native.clone());
-        #[cfg(unwind)]
         let dump = dump.arg(native.clone());
 
         // Nonblocking isn't an option for freebsd, remove
@@ -359,6 +360,14 @@ impl Config {
         let mut config = Config::default();
 
         let (subcommand, matches) = matches.subcommand().unwrap();
+
+        // Check if `--native` was used on an unsupported platform
+        if !cfg!(feature = "unwind") && matches.contains_id("native") {
+            eprintln!(
+                "Collecting stack traces from native extensions (`--native`) is not supported on your platform."
+            );
+            std::process::exit(1);
+        }
 
         match subcommand {
             "record" => {
@@ -428,7 +437,7 @@ impl Config {
             .value_of("pid")
             .map(|p| p.parse().expect("invalid pid"));
         config.full_filenames = matches.occurrences_of("full_filenames") > 0;
-        if cfg!(unwind) {
+        if cfg!(feature = "unwind") {
             config.native = matches.occurrences_of("native") > 0;
         }
 

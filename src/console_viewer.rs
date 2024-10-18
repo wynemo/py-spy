@@ -532,9 +532,6 @@ mod os_impl {
             {
                 let mut termios = termios;
                 termios.c_lflag &= !(ICANON | ECHO);
-                // #[cfg(any(target_arch = "mips64le", target_arch = "mips64"))]
-                // tcsetattr(stdin, 0x540e, &termios)?;
-                // #[cfg(not(any(target_arch = "mips64le", target_arch = "mips64")))]
                 tcsetattr(stdin, TCSANOW, &termios)?;
             }
 

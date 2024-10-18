@@ -26,7 +26,6 @@ impl BinaryInfo {
 
 /// Uses goblin to parse a binary file, returns information on symbols/bss/adjusted offset etc
 pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo, Error> {
-    info!("parse_binary @ {} {} {}", filename.display(), addr, size);
     let offset = addr;
 
     let mut symbols = HashMap::new();
@@ -94,7 +93,6 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
         }
 
         Object::Elf(elf) => {
-            info!("Found libpython binary in elf");
             let bss_header = elf
                 .section_headers
                 .iter()
@@ -176,10 +174,6 @@ pub fn parse_binary(filename: &Path, addr: u64, size: u64) -> Result<BinaryInfo,
                     }
                 })
         }
-        // _ => Err(format_err!("Unhandled binary type")),
-        _ => {
-            info!("Unhandled binary type {:?}", Object::parse(&buffer)?);
-            Err(format_err!("Unhandled binary type"))
-        }
+        _ => Err(format_err!("Unhandled binary type")),
     }
 }
